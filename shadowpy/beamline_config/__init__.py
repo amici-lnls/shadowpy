@@ -1,0 +1,1 @@
+"""Beamline configuration data shipped with shadowpy."""
