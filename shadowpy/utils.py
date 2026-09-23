@@ -181,14 +181,25 @@ class Image:
     histogram: np.ndarray
     bin_h_edges: np.ndarray
     bin_v_edges: np.ndarray
+    sigma_h: float
+    sigma_v: float
 
-    @property
-    def sigma_h(self):
-        return _calc_sigma(self.bin_h_edges, self.histogram, axis=1)
+    @classmethod
+    def from_ticket(cls, ticket: dict):
+        return cls(histogram=ticket["histogram"],
+                   bin_h_edges=ticket["bin_h_edges"],
+                   bin_v_edges=ticket["bin_v_edges"],
+                   sigma_h=ticket['fwhm_h']/(2 * np.sqrt(2 * np.log(2))),
+                   sigma_v=ticket['fwhm_v']/(2 * np.sqrt(2 * np.log(2)))
+                )
 
-    @property
-    def sigma_v(self):
-        return _calc_sigma(self.bin_v_edges, self.histogram, axis=0)
+    # @property
+    # def sigma_h(self):
+    #     return _calc_sigma(self.bin_h_edges, self.histogram, axis=1)
+
+    # @property
+    # def sigma_v(self):
+    #     return _calc_sigma(self.bin_v_edges, self.histogram, axis=0)
 
 def save_image(element, beam: Shadow.Beam, nbins=200):
         """
@@ -227,9 +238,9 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
                                    nbins_h=nbins_h, nbins_v=nbins_v, 
                                    nbins=nbins, nolost=1)
 
-        histogram   = image_ticket["histogram"]
-        bin_h_edges = image_ticket["bin_h_edges"]
-        bin_v_edges = image_ticket["bin_v_edges"]
+        # histogram   = image_ticket["histogram"]
+        # bin_h_edges = image_ticket["bin_h_edges"]
+        # bin_v_edges = image_ticket["bin_v_edges"]
 
         # We instantiate the analyzer to compute the image statistics, 
         # used for fitting the beam profile and computing the beam size.
@@ -240,7 +251,7 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
         # ana.fit(hprm=ana.hprm_momenta, useroi=True)
 
         # image named tuple
-        image = Image(histogram=histogram, bin_h_edges=bin_h_edges, bin_v_edges=bin_v_edges)
+        image = Image.from_ticket(image_ticket)
         # print("save_image: hprm_momenta -- ", type(ana.hprm_momenta))
         
         return image
