@@ -181,16 +181,24 @@ class Image:
     histogram: np.ndarray
     bin_h_edges: np.ndarray
     bin_v_edges: np.ndarray
+    bin_h_centers: np.ndarray
+    bin_v_centers: np.ndarray
     sigma_h: float
     sigma_v: float
+    centroid_h: float
+    centroid_v: float
 
     @classmethod
     def from_ticket(cls, ticket: dict):
         return cls(histogram=ticket["histogram"],
                    bin_h_edges=ticket["bin_h_edges"],
                    bin_v_edges=ticket["bin_v_edges"],
+                   bin_h_centers=ticket["bin_h_center"],
+                   bin_v_centers=ticket["bin_v_center"],                                      
                    sigma_h=ticket['fwhm_h']/(2 * np.sqrt(2 * np.log(2))),
-                   sigma_v=ticket['fwhm_v']/(2 * np.sqrt(2 * np.log(2)))
+                   sigma_v=ticket['fwhm_v']/(2 * np.sqrt(2 * np.log(2))),
+                   centroid_h=np.sum(ticket['fwhm_coordinates_h'])/2, 
+                   centroid_v=np.sum(ticket['fwhm_coordinates_v'])/2
                 )
 
     # @property
