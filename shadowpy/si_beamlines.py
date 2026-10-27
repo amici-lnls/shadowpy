@@ -38,7 +38,7 @@ class CAXSim(BeamLine):
                                             relative_rotation=shadow_R, 
                                             name="shadow")
 
-    def __init__(self, total_rays: int = 100000):
+    def __init__(self, total_rays: int = 100000, image_size: tuple = (210, 280)):
         # Initialize the elements
 
 
@@ -46,6 +46,8 @@ class CAXSim(BeamLine):
         self.total_rays = total_rays        
         source = BendingMagnet("B1", f"{self.CAX_SPECS}/source B1.txt")
 
+        self.mask_A1 = Slits(name="MASK_A1", 
+                             specification_file=f"{self.CAX_SPECS}/mask_A1.txt")
         self.mirror = ToroidalMirror(name="M1", 
                                      specification_file=f"{self.CAX_SPECS}/mirror M1.txt")
         self.dvf_A1 = Slits(name="DVF_A1", 
@@ -55,11 +57,15 @@ class CAXSim(BeamLine):
         # self.dvf_B1.pixel_size = 0.48/1000 # .48 μm in mm
         beam = Shadow.Beam()
         
-        source.shadow_oe.NPOINT = self.total_rays
 
         super().__init__(name="CAX", beam=beam, source=source, 
-                 optical_elements=[self.mirror, self.dvf_A1, self.dvf_B1], 
+                 optical_elements=[self.mask_A1,
+                                   self.mirror, 
+                                   self.dvf_A1, 
+                                   self.dvf_B1], 
                  beamline_frame=self.shadow_frame, 
-                 lab_frame=self.sirius_frame)
+                 lab_frame=self.sirius_frame,
+                 image_size=image_size,
+                 total_rays=self.total_rays)
         
         self.trace()
