@@ -209,7 +209,7 @@ class Image:
     # def sigma_v(self):
     #     return _calc_sigma(self.bin_v_edges, self.histogram, axis=0)
 
-def save_image(element, beam: Shadow.Beam, nbins=200):
+def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280)):
         """
         Save the image of the beam after passing through an optical element.
         """
@@ -228,10 +228,10 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
         y_range = beam.get_good_range(y_index)
 
         # Discover number of bins necessary to get desired resolution
-        nbins_h, nbins_v = 280, 210
-        if element.pixel_size is not None:
-            nbins_h = int((x_range[1] - x_range[0])/(element.pixel_size))+1
-            nbins_v = int((y_range[1] - y_range[0])/(element.pixel_size))+1
+        nbins_v, nbins_h = image_size
+        # if element.pixel_size is not None:
+        #     nbins_h = int((x_range[1] - x_range[0])/(element.pixel_size))+1
+        #     nbins_v = int((y_range[1] - y_range[0])/(element.pixel_size))+1
 
         # Use good range spans to determine if image is taller than wide
         x_span = x_range[1] - x_range[0]
@@ -240,11 +240,10 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
             nbins_h, nbins_v = nbins_v, nbins_h
 
         # Enforce 4:3 aspect ratio from the dominant (horizontal) dimension
-        nbins_v = int(nbins_h * 3 / 4)
+        # nbins_v = int(nbins_h * 3 / 4)
 
         image_ticket = beam.histo2(col_h=x_index, col_v=y_index, 
-                                   nbins_h=nbins_h, nbins_v=nbins_v, 
-                                   nbins=nbins, nolost=1)
+                                   nbins_h=nbins_h, nbins_v=nbins_v, nolost=1)
 
         # histogram   = image_ticket["histogram"]
         # bin_h_edges = image_ticket["bin_h_edges"]

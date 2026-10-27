@@ -61,7 +61,7 @@ class BeamLine:
 
     def __init__(self, name: str, beam: Shadow.Beam, source: Source, 
                  optical_elements: list = None, beamline_frame=None, 
-                 lab_frame=None):
+                 lab_frame=None, total_rays: int = 100000, image_size=(280, 210)):
         self.name = name
         self.beam = beam
         self.source = source
@@ -70,15 +70,17 @@ class BeamLine:
         self.lab_frame = lab_frame
         # Flag to indicate if the beamline has been traced 
         # since the last modification
-        self.up_to_date = False  
+        self.up_to_date = False
+        self.total_rays = total_rays
+        self.source.shadow_oe.NPOINT = self.total_rays
+        self.image_size = image_size
         self.initialize_elements()
-
 
         # Initialize the source and save the initial image
         # with silence_c_libs():
         self.beam.genSource(self.source.shadow_oe)
 
-        self.source.img = save_image(self.source, self.beam)
+        self.source.img = save_image(self.source, self.beam, image_size=self.image_size)
         self.source.up_to_date = True
         self.source.beamline = self
 
@@ -132,7 +134,7 @@ class BeamLine:
             self.beams[i+1] = self.beam.duplicate()
 
             # Save the image after each element
-            element.img = save_image(element, self.beams[i+1])
+            element.img = save_image(element, self.beams[i+1], image_size=self.image_size)
 
     def trace(self):
         """
@@ -162,7 +164,7 @@ class BeamLine:
             print(f"Traced through element {i+1}: {element.name}")
 
             # Save the image after each element
-            element.img = save_image(element, current_beam)
+            element.img = save_image(element, current_beam, image_size=self.image_size)
             # Update the element's beam
             element.beam = current_beam.duplicate()  
             # Mark the element as updated
