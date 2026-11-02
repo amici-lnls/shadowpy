@@ -201,6 +201,35 @@ class Image:
                    centroid_v=np.sum(ticket['fwhm_coordinates_v'])/2
                 )
 
+    @property
+    def bin_area(self) -> float:
+        """Physical area of one histogram bin."""
+        dh = np.diff(self.bin_h_edges)
+        dv = np.diff(self.bin_v_edges)
+        if dh.size == 0 or dv.size == 0:
+            return 0.0
+        return float(np.median(dh) * np.median(dv))
+
+    @property
+    def beam_area(self) -> float:
+        """Gaussian-equivalent beam area, 2*pi*sigma_h*sigma_v."""
+        return float(2.0 * np.pi * self.sigma_h * self.sigma_v)
+
+    @property
+    def peak(self) -> float:
+        """Maximum histogram occupancy."""
+        if self.histogram.size == 0:
+            return 0.0
+        return float(np.max(self.histogram))
+
+    @property
+    def peak_density(self) -> float:
+        """Maximum histogram occupancy per unit area."""
+        area = self.bin_area
+        if area <= 0:
+            return 0.0
+        return self.peak / area
+
     # @property
     # def sigma_h(self):
     #     return _calc_sigma(self.bin_h_edges, self.histogram, axis=1)
@@ -209,9 +238,66 @@ class Image:
     # def sigma_v(self):
     #     return _calc_sigma(self.bin_v_edges, self.histogram, axis=0)
 
-def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280)):
+
+def _robust_beam_range(beam: Shadow.Beam, col: int,
+                       quantiles: tuple = (0.001, 0.999),
+                       pad_fraction: float = 0.05,
+                       nolost: int = 1):
+    """
+    Return a robust, translation-invariant coordinate range for a beam column.
+
+    The range follows the requested quantiles of the selected rays and is padded
+    by a fraction of the robust span. It does not depend on the absolute beam
+    position, so translating the beam does not change the window width.
+    """
+    if not 0.0 <= quantiles[0] < quantiles[1] <= 1.0:
+        raise ValueError("quantiles must satisfy 0 <= low < high <= 1")
+    if pad_fraction < 0.0:
+        raise ValueError("pad_fraction must be non-negative")
+
+    values = np.asarray(beam.getshonecol(col, nolost=nolost), dtype=float)
+    values = values[np.isfinite(values)]
+
+    if values.size == 0:
+        return [-1.0, 1.0]
+
+    lo, hi = np.quantile(values, quantiles)
+    span = hi - lo
+
+    if span <= 0.0:
+        scale = float(np.std(values))
+        span = 10.0 * scale if scale > 0.0 else 2.0e-9
+        center = float(np.median(values))
+        lo = center - span / 2.0
+        hi = center + span / 2.0
+        span = hi - lo
+
+    margin = pad_fraction * span
+    return [float(lo - margin), float(hi + margin)]
+
+
+def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280),
+               range_mode: str = "robust",
+               quantiles: tuple = (0.0001, 0.9999),
+               pad_fraction: float = 0.10):
         """
         Save the image of the beam after passing through an optical element.
+
+        Parameters
+        ----------
+        element : OpticalElement
+            Element whose frame defines the image axes.
+        beam : Shadow.Beam
+            Beam to histogram.
+        image_size : tuple
+            Number of bins as ``(nbins_v, nbins_h)``.
+        range_mode : str
+            ``"robust"`` uses quantile-based, beam-relative ranges. ``"shadow"``
+            preserves the legacy ``Beam.get_good_range`` behavior.
+        quantiles : tuple
+            Low and high quantiles used by ``"robust"`` mode.
+        pad_fraction : float
+            Fraction of the robust span added to each side in ``"robust"`` mode.
         """
         lab_x = np.array([1, 0, 0])  #Lab x hat
         lab_y = np.array([0, 1, 0])  #Lab y hat
@@ -223,9 +309,19 @@ def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280)):
         x_index = np.argmax(np.abs(local_x))+1 
         y_index = np.argmax(np.abs(local_y))+1
 
-        # Get Shadow's estimate for good range in mm
-        x_range = beam.get_good_range(x_index)
-        y_range = beam.get_good_range(y_index)
+        if range_mode == "robust":
+            x_range = _robust_beam_range(beam, x_index, quantiles=quantiles,
+                                         pad_fraction=pad_fraction, nolost=1)
+            y_range = _robust_beam_range(beam, y_index, quantiles=quantiles,
+                                         pad_fraction=pad_fraction, nolost=1)
+            histo_range_kwargs = {"xrange": x_range, "yrange": y_range}
+        elif range_mode == "shadow":
+            # Get Shadow's estimate for good range in mm
+            x_range = beam.get_good_range(x_index)
+            y_range = beam.get_good_range(y_index)
+            histo_range_kwargs = {}
+        else:
+            raise ValueError("range_mode must be 'robust' or 'shadow'")
 
         # Discover number of bins necessary to get desired resolution
         nbins_v, nbins_h = image_size
@@ -243,7 +339,8 @@ def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280)):
         # nbins_v = int(nbins_h * 3 / 4)
 
         image_ticket = beam.histo2(col_h=x_index, col_v=y_index, 
-                                   nbins_h=nbins_h, nbins_v=nbins_v, nolost=1)
+                                   nbins_h=nbins_h, nbins_v=nbins_v, nolost=1,
+                                   **histo_range_kwargs)
 
         # histogram   = image_ticket["histogram"]
         # bin_h_edges = image_ticket["bin_h_edges"]
