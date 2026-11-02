@@ -190,16 +190,32 @@ class Image:
 
     @classmethod
     def from_ticket(cls, ticket: dict):
-        return cls(histogram=ticket["histogram"],
-                   bin_h_edges=ticket["bin_h_edges"],
-                   bin_v_edges=ticket["bin_v_edges"],
-                   bin_h_centers=ticket["bin_h_center"],
-                   bin_v_centers=ticket["bin_v_center"],                                      
-                   sigma_h=ticket['fwhm_h']/(2 * np.sqrt(2 * np.log(2))),
-                   sigma_v=ticket['fwhm_v']/(2 * np.sqrt(2 * np.log(2))),
-                   centroid_h=np.sum(ticket['fwhm_coordinates_h'])/2, 
-                   centroid_v=np.sum(ticket['fwhm_coordinates_v'])/2
-                )
+        histogram = ticket.get("histogram", np.empty((0, 0)))
+        bin_h_edges = ticket.get("bin_h_edges", np.array([]))
+        bin_v_edges = ticket.get("bin_v_edges", np.array([]))
+        bin_h_centers = ticket.get("bin_h_center", np.array([]))
+        bin_v_centers = ticket.get("bin_v_center", np.array([]))
+
+        fwhm_h = ticket.get("fwhm_h")
+        fwhm_v = ticket.get("fwhm_v")
+        coordinates_h = ticket.get("fwhm_coordinates_h")
+        coordinates_v = ticket.get("fwhm_coordinates_v")
+
+        sigma_h = np.nan if fwhm_h is None else float(fwhm_h) / (2 * np.sqrt(2 * np.log(2)))
+        sigma_v = np.nan if fwhm_v is None else float(fwhm_v) / (2 * np.sqrt(2 * np.log(2)))
+
+        centroid_h = np.nan if coordinates_h is None or len(coordinates_h) == 0 else float(np.mean(coordinates_h))
+        centroid_v = np.nan if coordinates_v is None or len(coordinates_v) == 0 else float(np.mean(coordinates_v))
+
+        return cls(histogram=np.asarray(histogram),
+                   bin_h_edges=np.asarray(bin_h_edges, dtype=float),
+                   bin_v_edges=np.asarray(bin_v_edges, dtype=float),
+                   bin_h_centers=np.asarray(bin_h_centers, dtype=float),
+                   bin_v_centers=np.asarray(bin_v_centers, dtype=float),
+                   sigma_h=sigma_h,
+                   sigma_v=sigma_v,
+                   centroid_h=centroid_h,
+                   centroid_v=centroid_v)
 
     @property
     def bin_area(self) -> float:
@@ -276,19 +292,19 @@ def _robust_beam_range(beam: Shadow.Beam, col: int,
     return [float(lo - margin), float(hi + margin)]
 
 
-def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280),
-               range_mode: str = "robust",
-               quantiles: tuple = (0.0001, 0.9999),
-               pad_fraction: float = 0.10):
-        """
-        Save the image of the beam after passing through an optical element.
+def image_from_beam(beam: Shadow.Beam, frame: ReferenceFrame,
+                   image_size: tuple = (210, 280),
+                   range_mode: str = "robust",
+                   quantiles: tuple = (0.0001, 0.9999),
+                   pad_fraction: float = 0.10):
+        """Build an :class:`Image` from a beam and its reference frame.
 
         Parameters
         ----------
-        element : OpticalElement
-            Element whose frame defines the image axes.
         beam : Shadow.Beam
             Beam to histogram.
+        frame : ReferenceFrame
+            Reference frame defining the beam image axes.
         image_size : tuple
             Number of bins as ``(nbins_v, nbins_h)``.
         range_mode : str
@@ -299,15 +315,17 @@ def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280),
         pad_fraction : float
             Fraction of the robust span added to each side in ``"robust"`` mode.
         """
-        lab_x = np.array([1, 0, 0])  #Lab x hat
-        lab_y = np.array([0, 1, 0])  #Lab y hat
+        if frame is None:
+            raise ValueError("frame must be provided to derive the beam image axes.")
 
-        local_x = element.frame.vector_from_lab(lab_x)
-        local_y = element.frame.vector_from_lab(lab_y)
+        lab_x = np.array([1, 0, 0])
+        lab_y = np.array([0, 1, 0])
 
-        # 1 = x, 2 = y, 3 = z
-        x_index = np.argmax(np.abs(local_x))+1 
-        y_index = np.argmax(np.abs(local_y))+1
+        local_x = frame.vector_from_lab(lab_x)
+        local_y = frame.vector_from_lab(lab_y)
+
+        x_index = np.argmax(np.abs(local_x)) + 1
+        y_index = np.argmax(np.abs(local_y)) + 1
 
         if range_mode == "robust":
             x_range = _robust_beam_range(beam, x_index, quantiles=quantiles,
@@ -316,46 +334,34 @@ def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280),
                                          pad_fraction=pad_fraction, nolost=1)
             histo_range_kwargs = {"xrange": x_range, "yrange": y_range}
         elif range_mode == "shadow":
-            # Get Shadow's estimate for good range in mm
             x_range = beam.get_good_range(x_index)
             y_range = beam.get_good_range(y_index)
             histo_range_kwargs = {}
         else:
             raise ValueError("range_mode must be 'robust' or 'shadow'")
 
-        # Discover number of bins necessary to get desired resolution
         nbins_v, nbins_h = image_size
-        # if element.pixel_size is not None:
-        #     nbins_h = int((x_range[1] - x_range[0])/(element.pixel_size))+1
-        #     nbins_v = int((y_range[1] - y_range[0])/(element.pixel_size))+1
-
-        # Use good range spans to determine if image is taller than wide
         x_span = x_range[1] - x_range[0]
         y_span = y_range[1] - y_range[0]
         if y_span > x_span:
             nbins_h, nbins_v = nbins_v, nbins_h
 
-        # Enforce 4:3 aspect ratio from the dominant (horizontal) dimension
-        # nbins_v = int(nbins_h * 3 / 4)
+        image_ticket = beam.histo2(col_h=x_index, col_v=y_index,
+                                  nbins_h=nbins_h, nbins_v=nbins_v, nolost=1,
+                                  **histo_range_kwargs)
 
-        image_ticket = beam.histo2(col_h=x_index, col_v=y_index, 
-                                   nbins_h=nbins_h, nbins_v=nbins_v, nolost=1,
-                                   **histo_range_kwargs)
+        return Image.from_ticket(image_ticket)
 
-        # histogram   = image_ticket["histogram"]
-        # bin_h_edges = image_ticket["bin_h_edges"]
-        # bin_v_edges = image_ticket["bin_v_edges"]
 
-        # We instantiate the analyzer to compute the image statistics, 
-        # used for fitting the beam profile and computing the beam size.
-        # ana = Histogram2DAnalyzer(img=histogram,
-        #                           x_bin_edges=bin_h_edges,
-        #                           y_bin_edges=bin_v_edges)
-        # ana.compute_momenta(useroi=False)
-        # ana.fit(hprm=ana.hprm_momenta, useroi=True)
-
-        # image named tuple
-        image = Image.from_ticket(image_ticket)
-        # print("save_image: hprm_momenta -- ", type(ana.hprm_momenta))
-        
-        return image
+def save_image(element, beam: Shadow.Beam, image_size: tuple = (210, 280),
+               range_mode: str = "robust",
+               quantiles: tuple = (0.0001, 0.9999),
+               pad_fraction: float = 0.10):
+        """Backward-compatible wrapper around :func:`image_from_beam`."""
+        if element is None:
+            raise ValueError("element must be provided to save an image.")
+        if getattr(element, "frame", None) is None:
+            raise ValueError("element.frame must be defined to save a beam image.")
+        return image_from_beam(beam, element.frame, image_size=image_size,
+                               range_mode=range_mode, quantiles=quantiles,
+                               pad_fraction=pad_fraction)
